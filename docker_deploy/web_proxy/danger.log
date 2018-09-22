@@ -1,0 +1,39 @@
+The proxy always receives all data in a request/response before it forwards
+it to the other side.  This can cause performance issues.  More importantly,
+when Content-Length is very large, the proxy may run out of memory.
+The ideal way to solve this problem is to set a threshold of message body size.
+When the size exceeds the limit, turn the proxy into "forward-only" mode:
+it forwards data as soon as it receives (similar to the tunneling mode
+except that the proxy is reponsible of determining the end of the body).
+This is, however, unimplemented in our proxy.
+
+The cache did not restrict the maximum size of an entry, it may run out of memory
+if several giant responses are stored.
+This is changed now by limiting the maximum body size of an cache entry to 2MB.
+
+Currently a linear search is required to find a header field because I use
+a linear list to store the header fields.
+I could use a map instead, but I would like to preserve the order.
+Linear search may hurt performance.
+Although a typical HTTP message does not have too many header fields,
+bad input built on purpose (with a lot of header fields) may cause trouble.
+
+All active connection objects were stored in a container and these
+objects remove themselves upon connection close.  However, it is possible
+that an exception is thrown, in which case the "removing" code will
+not be executed and the objects stay in the container.
+The solution is to use share_enabled_from_this for the connection class,
+and the connection objects will be released when there are no more references
+to them.
+
+We handle exceptions in three different ways:
+- The only exception we manually throw is ParseError.  We explicitly catch
+  this exception and send a response (400 or 502) accordingly.
+- Other exceptions (bad_alloc, etc.) during the proxy is running are not
+  catched until the connection object is destructed.
+  In this case, the other side of the connection will see a closed connection
+  instead of a proper error message.  (In the case of bad_alloc, the system
+  is likely running out of memory, so we may not even have the memory
+  to create an response.)
+- Exceptions before the proxy is running (e.g., failed to bind, failed to
+  open the log) are not catched and the program will terminate.
